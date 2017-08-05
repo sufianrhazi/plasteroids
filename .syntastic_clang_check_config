@@ -1,0 +1,6 @@
+-std=c11
+-pthread
+-I/usr/lib/swi-prolog/include
+-D_REENTRANT
+-I/usr/include/SDL2
+-fPIC 
