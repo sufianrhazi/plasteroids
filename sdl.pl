@@ -5,32 +5,93 @@ rand_color(RGBA) :-
     random_between(0, 40, A),
     RGBA = rgba(R, G, B, A).
 
-handle_event(_, terminal, terminal).
+update_state(Delta, State, NextState) :-
+    ((State.ship.turn = clockwise)
+        -> Dir is State.ship.dir + pi * Delta
+        ; true),
+    ((State.ship.turn = counterclockwise)
+        -> Dir is State.ship.dir - pi * Delta
+        ; true),
+    ((State.ship.turn = no)
+        -> Dir = State.ship.dir
+        ; true),
+    ((State.ship.accel = false)
+        -> (
+            DX = State.ship.dx,
+            DY = State.ship.dy
+        ); true),
+    ((State.ship.accel = true)
+        -> (
+            DX is State.ship.dx + Delta * 50 * cos(State.ship.dir),
+            DY is State.ship.dy + Delta * 50 * sin(State.ship.dir)
+        ); true),
+    X is State.ship.x + Delta * DX,
+    Y is State.ship.y + Delta * DY,
+    NextState = State
+        .put(ship, 
+            State.ship
+                .put(dir, Dir)
+                .put(dx, DX)
+                .put(dy, DY)
+                .put(x, X)
+                .put(y, Y)
+            ).
 
-handle_event(quit, _, terminal).
+handle_event(Delta, _, terminal, terminal).
 
-handle_event(Event, State, NextState) :-
-    get_time(Now),
-    Delta is Now - State.time,
-    NextState = State.put(time, Now).
+handle_event(Delta, quit, _, terminal).
+
+handle_event(Delta, key("Right", down, initial), State, TerminalState) :-
+    InputState = State.put(ship, State.ship.put(turn, clockwise)),
+    update_state(Delta, InputState, TerminalState).
+
+handle_event(Delta, key("Right", up, initial), State, TerminalState) :-
+    InputState = State.put(ship, State.ship.put(turn, no)),
+    update_state(Delta, InputState, TerminalState).
+
+handle_event(Delta, key("Left", down, initial), State, TerminalState) :-
+    InputState = State.put(ship, State.ship.put(turn, counterclockwise)),
+    update_state(Delta, InputState, TerminalState).
+
+handle_event(Delta, key("Left", up, initial), State, TerminalState) :-
+    InputState = State.put(ship, State.ship.put(turn, no)),
+    update_state(Delta, InputState, TerminalState).
+
+handle_event(Delta, key("Up", down, initial), State, TerminalState) :-
+    InputState = State.put(ship, State.ship.put(accel, true)),
+    update_state(Delta, InputState, TerminalState).
+
+handle_event(Delta, key("Up", up, initial), State, TerminalState) :-
+    InputState = State.put(ship, State.ship.put(accel, false)),
+    update_state(Delta, InputState, TerminalState).
+
+handle_event(Delta, key("Space", down, initial), State, TerminalState) :-
+    write("Fire!\n"),
+    update_state(Delta, State, TerminalState).
+
+handle_event(Delta, _, State, TerminalState) :-
+    update_state(Delta, State, TerminalState).
 
 draw_state(Renderer, State) :-
-    sdl_render_color(Renderer, rgba(0, 0, 0, 10)),
+    sdl_render_color(Renderer, rgba(0, 0, 0, 255)),
     sdl_render_clear(Renderer),
     draw_stars(State.time, Renderer, State.stars),
+    draw_ship(Renderer, State.ship),
     sdl_render_present(Renderer).
 
 pump_events(EndTime, State, NextState) :-
-    get_time(Now),
-    ((Now =< EndTime) -> (
-        MaxWait is round(1000 * (EndTime - Now)),
+    Start = State.time,
+    ((Start =< EndTime) -> (
+        MaxWait is round(1000 * (EndTime - Start)),
         sdl_wait_event(Event, MaxWait),
-        handle_event(Event, State, MidState),
-        ((Event \= timeout)
-            -> pump_events(EndTime, MidState, NextState)
-            ; MidState = NextState
-            )
-    ); NextState = State).
+        get_time(Now)
+    ); Event = timeout, Now = Start),
+    Delta is Now - Start,
+    handle_event(Delta, Event, State.put(time, Now), MidState),
+    ((Event = timeout; MidState = terminal)
+        -> MidState = NextState
+        ; pump_events(EndTime, MidState, NextState)
+        ).
 
 event_loop(Renderer, State) :-
     draw_state(Renderer, State),
@@ -77,13 +138,67 @@ draw_stars(Time, Renderer, [Star|Stars]) :-
     draw_star(Time, Renderer, Star),
     draw_stars(Time, Renderer, Stars).
 
+draw_ship(Renderer, Ship) :-
+    Size = 15,
+    HalfSize is round(Size / 2),
+    PeakX is round(Ship.x + cos(Ship.dir) * Size),
+    PeakY is round(Ship.y + sin(Ship.dir) * Size),
+    SeatX is round(Ship.x + cos(Ship.dir + pi) * Size * 1 / 4),
+    SeatY is round(Ship.y + sin(Ship.dir + pi) * Size * 1 / 4),
+    LX is round(Ship.x + cos(Ship.dir + pi * 3 / 4) * Size * 3 / 4),
+    LY is round(Ship.y + sin(Ship.dir + pi * 3 / 4) * Size * 3 / 4),
+    RX is round(Ship.x + cos(Ship.dir - pi * 3 / 4) * Size * 3 / 4),
+    RY is round(Ship.y + sin(Ship.dir - pi * 3 / 4) * Size * 3 / 4),
+    A = pt(PeakX, PeakY),
+    B = pt(LX, LY),
+    C = pt(SeatX, SeatY),
+    D = pt(RX, RY),
+    ((Ship.accel = true) -> 
+        (
+            random_between(-10, 10, Deg),
+            Rad is Deg * 2 * pi / 360,
+            FireX is round(Ship.x + 1.2 * Size * cos(Ship.dir + pi + Rad)),
+            FireY is round(Ship.y + 1.2 * Size * sin(Ship.dir + pi + Rad)),
+            FireLX is round(Ship.x + cos(Ship.dir + pi * 3 / 4) * HalfSize),
+            FireLY is round(Ship.y + sin(Ship.dir + pi * 3 / 4) * HalfSize),
+            FireRX is round(Ship.x + cos(Ship.dir - pi * 3 / 4) * HalfSize),
+            FireRY is round(Ship.y + sin(Ship.dir - pi * 3 / 4) * HalfSize),
+            FL = pt(FireLX, FireLY),
+            FR = pt(FireRX, FireRY),
+            FT = pt(FireX, FireY),
+            sdl_render_color(Renderer, rgba(255, 255, 0, 255)),
+            sdl_draw(Renderer, line(FL, FT)),
+            sdl_draw(Renderer, line(FR, FT))
+        ); true),
+    sdl_render_color(Renderer, rgba(255, 255, 255, 255)),
+    sdl_draw(Renderer, line(A, B)),
+    sdl_draw(Renderer, line(B, C)),
+    sdl_draw(Renderer, line(C, D)),
+    sdl_draw(Renderer, line(D, A)).
+
+initial_ship(Ship) :-
+    X is 640 / 2,
+    Y is 480 / 2,
+    Dir is pi / 2,
+    Ship = ship{
+        x: X,
+        y: Y,
+        dir: Dir,
+        turn: no,
+        accel: false,
+        dx: 0,
+        dy: 0
+    }.
+
 initial_state(State, Width, Height) :-
     initial_stars(Stars, 800),
+    initial_ship(Ship),
     get_time(When),
     State = state{
         stars: Stars,
         width: Width,
         height: Height,
+        ship: Ship,
         time: When
     }.
 
