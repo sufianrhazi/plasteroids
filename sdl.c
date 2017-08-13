@@ -23,6 +23,7 @@
 #include <SWI-Stream.h>
 #include <SWI-Prolog.h>
 #include <stdio.h>
+#include <math.h>
 
 PL_blob_t sdl_blob;
 
@@ -59,7 +60,7 @@ functor_t mouse_position_f;
 
 void initialize_terms() {
     rgba_f = PL_new_functor(PL_new_atom("rgba"), 4);
-    pt_f = PL_new_functor(PL_new_atom("pt"), 2);
+    pt_f = PL_new_functor(PL_new_atom("vec2"), 2);
     line_f = PL_new_functor(PL_new_atom("line"), 2);
     rect_f = PL_new_functor(PL_new_atom("rect"), 2);
     fill_f = PL_new_functor(PL_new_atom("fill"), 1);
@@ -157,7 +158,6 @@ static foreign_t pl_sdl_init(term_t subsystems) {
         else if (0 == strcmp("joystick",       atom)) { flags |= SDL_INIT_JOYSTICK; }
         else if (0 == strcmp("haptic",         atom)) { flags |= SDL_INIT_HAPTIC; }
         else if (0 == strcmp("gamecontroller", atom)) { flags |= SDL_INIT_GAMECONTROLLER; }
-        else if (0 == strcmp("haptic",         atom)) { flags |= SDL_INIT_HAPTIC; }
         else if (0 == strcmp("events",         atom)) { flags |= SDL_INIT_EVENTS; }
         else if (0 == strcmp("everything",     atom)) { flags |= SDL_INIT_EVERYTHING; }
     }
@@ -375,12 +375,20 @@ int get_point(term_t term, SDL_Point *point) {
     if (!PL_unify(term, pt)) goto fail;
     term_t xterm = PL_new_term_ref();
     long x;
+    double xd;
     if (!PL_get_arg(1, pt, xterm)) goto fail;
-    if (!PL_get_long(xterm, &x)) goto fail;
+    if (!PL_get_long(xterm, &x)) {
+        if (!PL_get_float(xterm, &xd)) goto fail;
+        x = lround(xd);
+    }
     term_t yterm = PL_new_term_ref();
     long y;
+    double yd;
     if (!PL_get_arg(2, pt, yterm)) goto fail;
-    if (!PL_get_long(yterm, &y)) goto fail;
+    if (!PL_get_long(yterm, &y)) {
+        if (!PL_get_float(yterm, &yd)) goto fail;
+        y = lround(yd);
+    }
     point->x = x;
     point->y = y;
     PL_close_foreign_frame(fid);

@@ -1,3 +1,26 @@
+vec2_eval(vec2(X, Y), vec2(X, Y)).
+
+vec2_eval(vec2(X, Y), A + B) :-
+    vec2_eval(vec2(AX, AY), A),
+    vec2_eval(vec2(BX, BY), B),
+    X is AX + BX,
+    Y is AY + BY.
+
+vec2_eval(vec2(X, Y), A - B) :-
+    vec2_eval(vec2(AX, AY), A),
+    vec2_eval(vec2(BX, BY), B),
+    X is AX - BX,
+    Y is AY - BY.
+
+vec2_eval(vec2(X, Y), scale(S, V)) :-
+    vec2_eval(vec2(VX, VY), V),
+    X is VX * S,
+    Y is VY * S.
+
+vec2_eval(vec2(X, Y), unit_rad(R)) :-
+    X is cos(R),
+    Y is sin(R).
+
 rand_color(RGBA) :-
     random_between(0, 255, R),
     random_between(0, 255, G),
@@ -5,22 +28,17 @@ rand_color(RGBA) :-
     random_between(0, 40, A),
     RGBA = rgba(R, G, B, A).
 
-bullet_bounds(Bullet, rect(pt(L, T), pt(R, B))) :-
-    pt(X, Y) = Bullet.pos,
-    L is round(X - 1),
-    R is round(X + 1),
-    T is round(Y - 1),
-    B is round(Y + 1).
+bullet_bounds(Bullet, rect(TopLeft, BottomRight)) :-
+    vec2_eval(TopLeft, Bullet.pos - vec2(1, 1)),
+    vec2_eval(BottomRight, Bullet.pos + vec2(1, 1)).
 
 update_bullet(State, Delta, Bullet, NewBullet) :-
-    pt(X, Y) = Bullet.pos,
-    NewX is X + Delta * Bullet.dx,
-    NewY is Y + Delta * Bullet.dy,
+    vec2_eval(Dest, Bullet.pos + scale(Delta, Bullet.vel)),
     Moved = Bullet.put(_{
-        pos: pt(NewX, NewY)
+        pos: Dest
     }),
     bullet_bounds(Moved, Bounds),
-    wrap_bounds(rect(pt(0, 0), pt(State.width, State.height)), Bounds, Moved.pos, WrapPos),
+    wrap_bounds(rect(vec2(0, 0), vec2(State.width, State.height)), Bounds, Moved.pos, WrapPos),
     NewBullet = Moved.put(pos, WrapPos).
 
 update_bullets(_, _, [], []).
@@ -33,47 +51,41 @@ update_bullets(State, Delta, [Bullet|Bullets], NewBullets) :-
           update_bullet(State, Delta, Bullet, Updated),
           update_bullets(State, Delta, Bullets, Rest).
 
-update_state(Delta, State, NextState) :-
-    ((State.ship.turn = clockwise)
-        -> Dir is State.ship.dir + pi * Delta
+update_ship(State, Delta, Ship, NextShip) :-
+    (Ship.turn = clockwise
+        -> Dir is Ship.dir + pi * Delta
         ; true),
-    ((State.ship.turn = counterclockwise)
-        -> Dir is State.ship.dir - pi * Delta
+    (Ship.turn = counterclockwise
+        -> Dir is Ship.dir - pi * Delta
         ; true),
-    ((State.ship.turn = no)
-        -> Dir = State.ship.dir
+    (Ship.turn = no
+        -> Dir = Ship.dir
         ; true),
-    ((State.ship.accel = false)
-        -> (
-            DX = State.ship.dx,
-            DY = State.ship.dy
-        ); true),
-    ((State.ship.accel = true)
-        -> (
-            DX is State.ship.dx + Delta * 50 * cos(State.ship.dir),
-            DY is State.ship.dy + Delta * 50 * sin(State.ship.dir)
-        ); true),
-    X is State.ship.x + Delta * DX,
-    Y is State.ship.y + Delta * DY,
-    NextShip = State.ship.put(_{
+    (Ship.accel = false
+        -> Vel = Ship.vel
+        ; true),
+    (Ship.accel = true
+        -> vec2_eval(Vel, Ship.vel + scale(Delta * 50, unit_rad(Ship.dir)))
+        ; true),
+    vec2_eval(Pos, Ship.pos + scale(Delta, Vel)),
+    MovedShip = Ship.put(_{
         dir: Dir,
-        dx: DX,
-        dy: DY,
-        x: X,
-        y: Y
+        vel: Vel,
+        pos: Pos
     }),
-    ship_bounds(NextShip, Bounds),
-    wrap_bounds(rect(pt(0, 0), pt(State.width, State.height)), Bounds, pt(X, Y), pt(WrapX, WrapY)),
+    ship_bounds(MovedShip, Bounds),
+    wrap_bounds(rect(vec2(0, 0), vec2(State.width, State.height)), Bounds, Pos, WrappedPos),
+    NextShip = MovedShip.put(pos, WrappedPos).
+
+update_state(Delta, State, NextState) :-
+    update_ship(State, Delta, State.ship, NextShip),
     update_bullets(State, Delta, State.bullets, NextBullets),
     NextState = State.put(_{
         bullets: NextBullets,
-        ship: NextShip.put(_{
-            x: WrapX,
-            y: WrapY
-        })
+        ship: NextShip
     }).
 
-wrap_bounds(rect(pt(OutL, OutT), pt(OutR, OutB)), rect(pt(InL, InT), pt(InR, InB)), pt(X, Y), pt(WrapX, WrapY)) :-
+wrap_bounds(rect(vec2(OutL, OutT), vec2(OutR, OutB)), rect(vec2(InL, InT), vec2(InR, InB)), vec2(X, Y), vec2(WrapX, WrapY)) :-
     (InR < OutL
         -> WrapX is OutR - OutL + X + InR - InL
         ; InL > OutR
@@ -85,9 +97,9 @@ wrap_bounds(rect(pt(OutL, OutT), pt(OutR, OutB)), rect(pt(InL, InT), pt(InR, InB
             -> WrapY is OutB + OutT + Y - InB - InT
             ; WrapY = Y).
 
-handle_event(Delta, _, terminal, terminal).
+handle_event(_, _, terminal, terminal).
 
-handle_event(Delta, quit, _, terminal).
+handle_event(_, quit, _, terminal).
 
 handle_event(Delta, key("Right", down, initial), State, TerminalState) :-
     InputState = State.put(ship, State.ship.put(turn, clockwise)),
@@ -131,11 +143,12 @@ draw_state(Renderer, State) :-
 
 pump_events(EndTime, State, NextState) :-
     Start = State.time,
-    ((Start =< EndTime) -> (
-        MaxWait is round(1000 * (EndTime - Start)),
-        sdl_wait_event(Event, MaxWait),
-        get_time(Now)
-    ); Event = timeout, Now = Start),
+    (Start =< EndTime
+        ->
+            MaxWait is round(1000 * (EndTime - Start)),
+            sdl_wait_event(Event, MaxWait),
+            get_time(Now)
+        ; Event = timeout, Now = Start),
     Delta is Now - Start,
     handle_event(Delta, Event, State.put(time, Now), MidState),
     ((Event = timeout; MidState = terminal)
@@ -161,7 +174,7 @@ initial_star(Star, Width, Height) :-
     random_between(0, 50, Intensity),
     random_between(30, 200, P),
     Period is 2 * pi * (P / 100),
-    Star = star{ x: X, y: Y, color: rgb(R, G, B), intensity: Intensity, period: Period }.
+    Star = star{ pos: vec2(X, Y), color: rgb(R, G, B), intensity: Intensity, period: Period }.
 
 initial_stars([], 0, _, _).
 
@@ -180,7 +193,7 @@ draw_star(Time, Renderer, Star) :-
     B is Ba + Bb,
     Alpha is 205 + round(Star.intensity * sin(Time * Star.period)),
     sdl_render_color(Renderer, rgba(R, G, B, Alpha)),
-    sdl_draw(Renderer, pt(Star.x, Star.y)).
+    sdl_draw(Renderer, Star.pos).
 
 draw_stars(_, _, []).
 
@@ -188,73 +201,61 @@ draw_stars(Time, Renderer, [Star|Stars]) :-
     draw_star(Time, Renderer, Star),
     draw_stars(Time, Renderer, Stars).
 
-ship_bounds(Ship, rect(pt(Left, Top), pt(Right, Bottom))) :-
-    ship_front(Ship, pt(X1, Y1)),
-    ship_left(Ship, pt(X2, Y2)),
-    ship_right(Ship, pt(X3, Y3)),
-    ship_back(Ship, pt(X4, Y4)),
+ship_bounds(Ship, rect(vec2(Left, Top), vec2(Right, Bottom))) :-
+    ship_front(Ship, vec2(X1, Y1)),
+    ship_left(Ship, vec2(X2, Y2)),
+    ship_right(Ship, vec2(X3, Y3)),
+    ship_back(Ship, vec2(X4, Y4)),
     Left is min(X1, min(X2, min(X3, X4))),
     Right is max(X1, max(X2, max(X3, X4))),
     Top is min(Y1, min(Y2, min(Y3, Y4))),
     Bottom is max(Y1, max(Y2, max(Y3, Y4))).
 
-ship_front(Ship, pt(X, Y)) :-
-    X is round(Ship.x + cos(Ship.dir) * Ship.size),
-    Y is round(Ship.y + sin(Ship.dir) * Ship.size).
+ship_front(Ship, FrontPos) :-
+    vec2_eval(FrontPos, Ship.pos + scale(Ship.size, unit_rad(Ship.dir))).
 
-ship_left(Ship, pt(X, Y)) :-
-    X is round(Ship.x + cos(Ship.dir + pi * 3 / 4) * Ship.size * 3 / 4),
-    Y is round(Ship.y + sin(Ship.dir + pi * 3 / 4) * Ship.size * 3 / 4).
+ship_left(Ship, WingPos) :-
+    vec2_eval(WingPos, Ship.pos + scale(Ship.size * 3 / 4, unit_rad(Ship.dir + pi * 3 / 4))).
 
-ship_right(Ship, pt(X, Y)) :-
-    X is round(Ship.x + cos(Ship.dir - pi * 3 / 4) * Ship.size * 3 / 4),
-    Y is round(Ship.y + sin(Ship.dir - pi * 3 / 4) * Ship.size * 3 / 4).
+ship_right(Ship, WingPos) :-
+    vec2_eval(WingPos, Ship.pos + scale(Ship.size * 3 / 4, unit_rad(Ship.dir - pi * 3 / 4))).
 
-ship_back(Ship, pt(X, Y)) :-
-    X is round(Ship.x + cos(Ship.dir + pi) * Ship.size * 1 / 4),
-    Y is round(Ship.y + sin(Ship.dir + pi) * Ship.size * 1 / 4).
+ship_back(Ship, ExhaustPos) :-
+    vec2_eval(ExhaustPos, Ship.pos + scale(Ship.size * 1 / 4, unit_rad(Ship.dir + pi))).
 
 draw_ship(Renderer, Ship) :-
     HalfSize is round(Ship.size / 2),
-    ship_front(Ship, A),
-    ship_left(Ship, B),
-    ship_back(Ship, C),
-    ship_right(Ship, D),
+    ship_front(Ship, ShipFront),
+    ship_left(Ship, ShipLeft),
+    ship_back(Ship, ShipBack),
+    ship_right(Ship, ShipRight),
     ((Ship.accel = true) -> 
         (
             random_between(-10, 10, Deg),
             Rad is Deg * 2 * pi / 360,
-            FireX is round(Ship.x + 1.2 * Ship.size * cos(Ship.dir + pi + Rad)),
-            FireY is round(Ship.y + 1.2 * Ship.size * sin(Ship.dir + pi + Rad)),
-            FireLX is round(Ship.x + cos(Ship.dir + pi * 3 / 4) * HalfSize),
-            FireLY is round(Ship.y + sin(Ship.dir + pi * 3 / 4) * HalfSize),
-            FireRX is round(Ship.x + cos(Ship.dir - pi * 3 / 4) * HalfSize),
-            FireRY is round(Ship.y + sin(Ship.dir - pi * 3 / 4) * HalfSize),
-            FL = pt(FireLX, FireLY),
-            FR = pt(FireRX, FireRY),
-            FT = pt(FireX, FireY),
+            vec2_eval(FireTip, Ship.pos + scale(Ship.size * 1.2, unit_rad(Ship.dir + pi + Rad))),
+            vec2_eval(FireLeft, Ship.pos + scale(HalfSize, unit_rad(Ship.dir + pi * 3 / 4))),
+            vec2_eval(FireRight, Ship.pos + scale(HalfSize, unit_rad(Ship.dir - pi * 3 / 4))),
             sdl_render_color(Renderer, rgba(255, 255, 0, 255)),
-            sdl_draw(Renderer, line(FL, FT)),
-            sdl_draw(Renderer, line(FR, FT))
+            sdl_draw(Renderer, line(FireLeft, FireTip)),
+            sdl_draw(Renderer, line(FireRight, FireTip))
         ); true),
     sdl_render_color(Renderer, rgba(255, 255, 255, 255)),
-    sdl_draw(Renderer, line(A, B)),
-    sdl_draw(Renderer, line(B, C)),
-    sdl_draw(Renderer, line(C, D)),
-    sdl_draw(Renderer, line(D, A)).
+    sdl_draw(Renderer, line(ShipFront, ShipLeft)),
+    sdl_draw(Renderer, line(ShipLeft, ShipBack)),
+    sdl_draw(Renderer, line(ShipBack, ShipRight)),
+    sdl_draw(Renderer, line(ShipRight, ShipFront)).
 
 initial_ship(Ship, Width, Height) :-
     X is Width / 2,
     Y is Height / 2,
     Dir is pi / 2,
     Ship = ship{
-        x: X,
-        y: Y,
+        pos: vec2(X, Y),
+        vel: vec2(0, 0),
         dir: Dir,
         turn: no,
         accel: false,
-        dx: 0,
-        dy: 0,
         size: 18
     }.
 
@@ -272,14 +273,12 @@ draw_bullets(Renderer, [Bullet|Bullets]) :-
 make_bullet(Ship, Bullet) :-
     get_time(Now),
     Expiry is Now + 2,
-    ship_front(Ship, Front),
+    ship_front(Ship, Pos),
     Speed = 200,
-    DX is Ship.dx + Speed * cos(Ship.dir),
-    DY is Ship.dy + Speed * sin(Ship.dir),
+    vec2_eval(Vel, Ship.vel + scale(Speed, unit_rad(Ship.dir))),
     Bullet = bullet{
-        pos: Front,
-        dx: DX,
-        dy: DY,
+        pos: Pos,
+        vel: Vel,
         expiry: Expiry
     }.
 
