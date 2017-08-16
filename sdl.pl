@@ -21,6 +21,10 @@ vec2_eval(vec2(X, Y), unit_rad(R)) :-
     X is cos(R),
     Y is sin(R).
 
+
+deg_rad(Deg, Rad) :-
+    Rad is Deg * 2 * pi / 360.
+
 rand_color(RGBA) :-
     random_between(0, 255, R),
     random_between(0, 255, G),
@@ -38,13 +42,15 @@ update_bullet(State, Delta, Bullet, NewBullet) :-
         pos: Dest
     }),
     bullet_bounds(Moved, Bounds),
-    wrap_bounds(rect(vec2(0, 0), vec2(State.width, State.height)), Bounds, Moved.pos, WrapPos),
+    get_assoc(dim, State, Dim),
+    wrap_bounds(rect(vec2(0, 0), Dim), Bounds, Moved.pos, WrapPos),
     NewBullet = Moved.put(pos, WrapPos).
 
 update_bullets(_, _, [], []).
 
 update_bullets(State, Delta, [Bullet|Bullets], NewBullets) :-
-    Bullet.expiry < State.time
+    get_assoc(time, State, Now),
+    Bullet.expiry < Now
         -> update_bullets(State, Delta, Bullets, NewBullets)
 
         ; [Updated|Rest] = NewBullets,
@@ -74,16 +80,17 @@ update_ship(State, Delta, Ship, NextShip) :-
         pos: Pos
     }),
     ship_bounds(MovedShip, Bounds),
-    wrap_bounds(rect(vec2(0, 0), vec2(State.width, State.height)), Bounds, Pos, WrappedPos),
+    get_assoc(dim, State, Dim),
+    wrap_bounds(rect(vec2(0, 0), Dim), Bounds, Pos, WrappedPos),
     NextShip = MovedShip.put(pos, WrappedPos).
 
 update_state(Delta, State, NextState) :-
-    update_ship(State, Delta, State.ship, NextShip),
-    update_bullets(State, Delta, State.bullets, NextBullets),
-    NextState = State.put(_{
-        bullets: NextBullets,
-        ship: NextShip
-    }).
+    get_assoc(ship, State, Ship),
+    update_ship(State, Delta, Ship, NextShip),
+    get_assoc(bullets, State, Bullets),
+    update_bullets(State, Delta, Bullets, NextBullets),
+    put_assoc(bullets, State, NextBullets, State1),
+    put_assoc(ship, State1, NextShip, NextState).
 
 wrap_bounds(rect(vec2(OutL, OutT), vec2(OutR, OutB)), rect(vec2(InL, InT), vec2(InR, InB)), vec2(X, Y), vec2(WrapX, WrapY)) :-
     (InR < OutL
@@ -102,32 +109,46 @@ handle_event(_, _, terminal, terminal).
 handle_event(_, quit, _, terminal).
 
 handle_event(Delta, key("Right", down, initial), State, TerminalState) :-
-    InputState = State.put(ship, State.ship.put(turn, clockwise)),
+    get_assoc(ship, State, Ship),
+    Ship1 = Ship.put(_{turn: clockwise}),
+    put_assoc(ship, State, Ship1, InputState),
     update_state(Delta, InputState, TerminalState).
 
 handle_event(Delta, key("Right", up, initial), State, TerminalState) :-
-    InputState = State.put(ship, State.ship.put(turn, no)),
+    get_assoc(ship, State, Ship),
+    Ship1 = Ship.put(_{turn: no}),
+    put_assoc(ship, State, Ship1, InputState),
     update_state(Delta, InputState, TerminalState).
 
 handle_event(Delta, key("Left", down, initial), State, TerminalState) :-
-    InputState = State.put(ship, State.ship.put(turn, counterclockwise)),
+    get_assoc(ship, State, Ship),
+    Ship1 = Ship.put(_{turn: counterclockwise}),
+    put_assoc(ship, State, Ship1, InputState),
     update_state(Delta, InputState, TerminalState).
 
 handle_event(Delta, key("Left", up, initial), State, TerminalState) :-
-    InputState = State.put(ship, State.ship.put(turn, no)),
+    get_assoc(ship, State, Ship),
+    Ship1 = Ship.put(_{turn: no}),
+    put_assoc(ship, State, Ship1, InputState),
     update_state(Delta, InputState, TerminalState).
 
 handle_event(Delta, key("Up", down, initial), State, TerminalState) :-
-    InputState = State.put(ship, State.ship.put(accel, true)),
+    get_assoc(ship, State, Ship),
+    Ship1 = Ship.put(_{accel: true}),
+    put_assoc(ship, State, Ship1, InputState),
     update_state(Delta, InputState, TerminalState).
 
 handle_event(Delta, key("Up", up, initial), State, TerminalState) :-
-    InputState = State.put(ship, State.ship.put(accel, false)),
+    get_assoc(ship, State, Ship),
+    Ship1 = Ship.put(_{accel: false}),
+    put_assoc(ship, State, Ship1, InputState),
     update_state(Delta, InputState, TerminalState).
 
 handle_event(Delta, key("Space", down, initial), State, TerminalState) :-
-    make_bullet(State.ship, Bullet),
-    InputState = State.put(bullets, [Bullet|State.bullets]),
+    get_assoc(ship, State, Ship),
+    make_bullet(Ship, Bullet),
+    get_assoc(bullets, State, Bullets),
+    put_assoc(bullets, State, [Bullet|Bullets], InputState),
     update_state(Delta, InputState, TerminalState).
 
 handle_event(Delta, _, State, TerminalState) :-
@@ -136,39 +157,47 @@ handle_event(Delta, _, State, TerminalState) :-
 draw_state(Renderer, State) :-
     sdl_render_color(Renderer, rgba(0, 0, 0, 255)),
     sdl_render_clear(Renderer),
-    draw_stars(State.time, Renderer, State.stars),
-    draw_ship(Renderer, State.ship),
-    draw_bullets(Renderer, State.bullets),
+    get_assoc(time, State, Now),
+    get_assoc(stars, State, Stars),
+    maplist(draw_star(Now, Renderer), Stars),
+    get_assoc(ship, State, Ship),
+    draw_ship(Renderer, Ship),
+    get_assoc(asteroids, State, Asteroids),
+    [Asteroid] = Asteroids,
+    draw_asteroid(Renderer, Asteroid),
+    get_assoc(bullets, State, Bullets),
+    maplist(draw_bullet(Renderer), Bullets),
     sdl_render_present(Renderer).
 
 pump_events(EndTime, State, NextState) :-
-    Start = State.time,
-    (Start =< EndTime
-        ->
-            MaxWait is round(1000 * (EndTime - Start)),
-            sdl_wait_event(Event, MaxWait),
-            get_time(Now)
-        ; Event = timeout, Now = Start),
+    get_assoc(time, State, Start),
+    (Start =< EndTime ->
+        sdl_wait_event(Event, 6),
+        get_time(Now)
+    ;
+        Event = timeout,
+        Now = Start
+    ),
     Delta is Now - Start,
-    handle_event(Delta, Event, State.put(time, Now), MidState),
-    ((Event = timeout; MidState = terminal)
-        -> MidState = NextState
-        ; pump_events(EndTime, MidState, NextState)
-        ).
+    put_assoc(time, State, Now, TimeState),
+    handle_event(Delta, Event, TimeState, MidState),
+    ((Event = timeout; MidState = terminal) ->
+        MidState = NextState
+    ;
+        pump_events(EndTime, MidState, NextState)
+    ).
 
-event_loop(Renderer, State) :-
+event_loop(Renderer, State, LastFrame) :-
     draw_state(Renderer, State),
-    !,
     get_time(Now),
-    Target is Now + 0.01666666,
+    Target is Now + 0.010,
     pump_events(Target, State, NextState),
-    !,
-    ((NextState \= terminal) -> event_loop(Renderer, NextState); true).
+    ((NextState \= terminal) -> event_loop(Renderer, NextState, Now); true).
 
 initial_star(Star, Width, Height) :-
-    random_between(100, 150, R),
-    random_between(100, 150, G),
-    random_between(100, 150, B),
+    random_between(50, 150, R),
+    random_between(50, 150, G),
+    random_between(50, 150, B),
     random_between(0, Width, X),
     random_between(0, Height, Y),
     random_between(0, 50, Intensity),
@@ -194,12 +223,6 @@ draw_star(Time, Renderer, Star) :-
     Alpha is 205 + round(Star.intensity * sin(Time * Star.period)),
     sdl_render_color(Renderer, rgba(R, G, B, Alpha)),
     sdl_draw(Renderer, Star.pos).
-
-draw_stars(_, _, []).
-
-draw_stars(Time, Renderer, [Star|Stars]) :-
-    draw_star(Time, Renderer, Star),
-    draw_stars(Time, Renderer, Stars).
 
 ship_bounds(Ship, rect(vec2(Left, Top), vec2(Right, Bottom))) :-
     ship_front(Ship, vec2(X1, Y1)),
@@ -232,7 +255,7 @@ draw_ship(Renderer, Ship) :-
     ((Ship.accel = true) -> 
         (
             random_between(-10, 10, Deg),
-            Rad is Deg * 2 * pi / 360,
+            deg_rad(Deg, Rad),
             vec2_eval(FireTip, Ship.pos + scale(Ship.size * 1.2, unit_rad(Ship.dir + pi + Rad))),
             vec2_eval(FireLeft, Ship.pos + scale(HalfSize, unit_rad(Ship.dir + pi * 3 / 4))),
             vec2_eval(FireRight, Ship.pos + scale(HalfSize, unit_rad(Ship.dir - pi * 3 / 4))),
@@ -260,15 +283,9 @@ initial_ship(Ship, Width, Height) :-
     }.
 
 draw_bullet(Renderer, Bullet) :-
-    sdl_render_color(Renderer, rgba(255, 200, 200, 255)),
+    sdl_render_color(Renderer, rgba(255, 255, 255, 255)),
     bullet_bounds(Bullet, Rect),
     sdl_draw(Renderer, fill(Rect)).
-
-draw_bullets(_, []).
-
-draw_bullets(Renderer, [Bullet|Bullets]) :-
-    draw_bullet(Renderer, Bullet),
-    draw_bullets(Renderer, Bullets).
 
 make_bullet(Ship, Bullet) :-
     get_time(Now),
@@ -282,18 +299,69 @@ make_bullet(Ship, Bullet) :-
         expiry: Expiry
     }.
 
-initial_state(State, Width, Height) :-
-    initial_stars(Stars, 800, Width, Height),
-    initial_ship(Ship, Width, Height),
-    get_time(When),
-    State = state{
-        stars: Stars,
-        bullets: [],
-        width: Width,
-        height: Height,
-        ship: Ship,
-        time: When
+draw_polygon(Renderer, []).
+draw_polygon(Renderer, [P]).
+draw_polygon(Renderer, [P,N]).
+draw_polygon(Renderer, [A,B,C|Rest]) :-
+    sdl_draw(Renderer, line(A, B)),
+    draw_polygon(Renderer, A, [B,C|Rest]).
+
+draw_polygon(Renderer, Initial, []). % should never happen
+
+draw_polygon(Renderer, Initial, [End]) :-
+    sdl_draw(Renderer, line(End, Initial)).
+
+draw_polygon(Renderer, Terminal, [P,G|T]) :-
+    sdl_draw(Renderer, line(P, G)),
+    draw_polygon(Renderer, Terminal, [G|T]).
+
+initial_asteroid_points(_, _, 0, []).
+
+initial_asteroid_points(NumPoints, Size, N, [Point|Points]) :-
+    MinDistance is round(Size * 0.75),
+    MaxDistance is round(Size * 1.25),
+    random_between(MinDistance, MaxDistance, Distance),
+    random_between(-50, 50, Jigger),
+    JiggerRad is (Jigger / 100) * 2 * pi / NumPoints,
+    Rad is JiggerRad + 2 * pi * N / NumPoints,
+    M is N - 1,
+    vec2_eval(Point, scale(Distance, unit_rad(Rad))),
+    initial_asteroid_points(NumPoints, Size, M, Points).
+
+initial_asteroid_points(NumPoints, Size, Points) :-
+    initial_asteroid_points(NumPoints, Size, NumPoints, Points).
+
+make_asteroid(Asteroid, Size, Width, Height) :-
+    random_between(0, Width, X),
+    random_between(0, Height, Y),
+    random_between(10, 15, NumPoints),
+    initial_asteroid_points(NumPoints, Size, Points),
+    Asteroid = asteroid{
+        size: Size,
+        pos: vec2(X, Y),
+        points: Points
     }.
+
+add_offset(Pos, Point, Dest) :-
+    vec2_eval(Dest, Pos + Point).
+
+draw_asteroid(Renderer, Asteroid) :-
+    maplist(add_offset(Asteroid.pos), Asteroid.points, Points),
+    draw_polygon(Renderer, Points).
+
+initial_state(State, Width, Height) :-
+    initial_stars(Stars, 400, Width, Height),
+    initial_ship(Ship, Width, Height),
+    make_asteroid(Asteroid, 50, Width, Height),
+    get_time(When),
+    list_to_assoc([
+        stars-Stars,
+        bullets-[],
+        asteroids-[Asteroid],
+        ship-Ship,
+        time-When,
+        dim-vec2(Width, Height)
+    ], State).
 
 main(_) :-
     guitracer,
@@ -305,7 +373,7 @@ main(_) :-
     sdl_create_renderer(Window, [software], Renderer),
     sdl_render_blendmode(Renderer, alpha),
     initial_state(State, Width, Height),
-    event_loop(Renderer, State),
+    event_loop(Renderer, State, 0),
     sdl_destroy_renderer(Renderer),
     sdl_destroy_window(Window),
     sdl_terminate.
