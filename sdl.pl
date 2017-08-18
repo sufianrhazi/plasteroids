@@ -126,9 +126,9 @@ wrap_bounds(rect(vec2(OutL, OutT), vec2(OutR, OutB)), rect(vec2(InL, InT), vec2(
             -> WrapY is OutB + OutT + Y - InB - InT
             ; WrapY = Y).
 
-handle_event(_, _, terminal, terminal).
+handle_event(_, _, quit, quit).
 
-handle_event(_, quit, _, terminal).
+handle_event(_, quit, _, quit).
 
 handle_event(Delta, key("Right", down, initial), State, TerminalState) :-
     get_assoc(ship, State, Ship),
@@ -190,30 +190,33 @@ draw_state(Renderer, State) :-
     maplist(draw_bullet(Renderer), Bullets),
     sdl_render_present(Renderer).
 
+pump_events(_, quit, quit).
+
 pump_events(EndTime, State, NextState) :-
     get_assoc(time, State, Start),
     (Start =< EndTime ->
-        sdl_wait_event(Event, 2),
-        get_time(Now)
+        sdl_wait_event(Event, 2)
     ;
-        Event = timeout,
-        Now = Start
+        Event = timeout
     ),
+    get_time(Now),
     Delta is Now - Start,
     put_assoc(time, State, Now, TimeState),
     handle_event(Delta, Event, TimeState, MidState),
-    ((Event = timeout; MidState = terminal) ->
+    ((Event = timeout; MidState = quit) ->
         MidState = NextState
     ;
         pump_events(EndTime, MidState, NextState)
     ).
+
+event_loop(_, quit).
 
 event_loop(Renderer, State) :-
     draw_state(Renderer, State),
     get_time(Now),
     Target is Now + 0.010,
     pump_events(Target, State, NextState),
-    ((NextState \= terminal) -> event_loop(Renderer, NextState); true).
+    event_loop(Renderer, NextState).
 
 initial_star(Star, Width, Height) :-
     random_between(50, 150, R),
