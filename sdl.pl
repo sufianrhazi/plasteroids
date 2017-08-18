@@ -61,6 +61,10 @@ bullet_bounds(Bullet, rect(TopLeft, BottomRight)) :-
     vec2_eval(TopLeft, Bullet.pos - vec2(1, 1)),
     vec2_eval(BottomRight, Bullet.pos + vec2(1, 1)).
 
+bullet_alive(State, Bullet) :-
+    get_assoc(time, State, Now),
+    Now < Bullet.expiry.
+
 update_bullet(State, Delta, Bullet, NewBullet) :-
     vec2_eval(Dest, Bullet.pos + scale(Delta, Bullet.vel)),
     Moved = Bullet.put(_{
@@ -70,17 +74,6 @@ update_bullet(State, Delta, Bullet, NewBullet) :-
     get_assoc(bounds, State, ScreenBounds),
     wrap_bounds(ScreenBounds, Bounds, Moved.pos, WrapPos),
     NewBullet = Moved.put(pos, WrapPos).
-
-update_bullets(_, _, [], []).
-
-update_bullets(State, Delta, [Bullet|Bullets], NewBullets) :-
-    get_assoc(time, State, Now),
-    Bullet.expiry < Now
-        -> update_bullets(State, Delta, Bullets, NewBullets)
-
-        ; [Updated|Rest] = NewBullets,
-          update_bullet(State, Delta, Bullet, Updated),
-          update_bullets(State, Delta, Bullets, Rest).
 
 update_ship(State, Delta, Ship, NextShip) :-
     (Ship.turn = clockwise
@@ -113,7 +106,8 @@ update_state(Delta, State, NextState) :-
     get_assoc(ship, State, Ship),
     update_ship(State, Delta, Ship, NextShip),
     get_assoc(bullets, State, Bullets),
-    update_bullets(State, Delta, Bullets, NextBullets),
+    include(bullet_alive(State), Bullets, LiveBullets),
+    maplist(update_bullet(State, Delta), LiveBullets, NextBullets),
     put_assoc(bullets, State, NextBullets, State1),
     get_assoc(asteroids, State, Asteroids),
     maplist(update_asteroid(State, Delta), Asteroids, NextAsteroids),
@@ -199,7 +193,7 @@ draw_state(Renderer, State) :-
 pump_events(EndTime, State, NextState) :-
     get_assoc(time, State, Start),
     (Start =< EndTime ->
-        sdl_wait_event(Event, 6),
+        sdl_wait_event(Event, 2),
         get_time(Now)
     ;
         Event = timeout,
@@ -231,13 +225,6 @@ initial_star(Star, Width, Height) :-
     random_between(30, 200, P),
     Period is 2 * pi * (P / 100),
     Star = star{ pos: vec2(X, Y), color: rgb(R, G, B), intensity: Intensity, period: Period }.
-
-initial_stars([], 0, _, _).
-
-initial_stars([Star|Stars], N, Width, Height) :-
-    M is N - 1,
-    initial_star(Star, Width, Height),
-    initial_stars(Stars, M, Width, Height).
 
 draw_star(Time, Renderer, Star) :-
     random_between(0, 100, Ra),
@@ -327,8 +314,8 @@ make_bullet(Ship, Bullet) :-
     }.
 
 draw_polygon(_, []).
-draw_polygon(_, [P]).
-draw_polygon(_, [P,N]).
+draw_polygon(_, [_]).
+draw_polygon(_, [_,_]).
 draw_polygon(Renderer, [A,B,C|Rest]) :-
     sdl_draw(Renderer, line(A, B)),
     draw_polygon(Renderer, A, [B,C|Rest]).
@@ -342,23 +329,18 @@ draw_polygon(Renderer, Terminal, [P,G|T]) :-
     sdl_draw(Renderer, line(P, G)),
     draw_polygon(Renderer, Terminal, [G|T]).
 
-initial_asteroid_points(_, 0, []).
-
-initial_asteroid_points(NumPoints, N, [Point|Points]) :-
+initial_asteroid_point(NumPoints, N, Point) :-
     random(Dist),
     Distance is Dist * 0.5 + 0.75,
     random_between(-50, 50, Jigger),
     JiggerRad is (Jigger / 100) * 2 * pi / NumPoints,
     Rad is JiggerRad + 2 * pi * N / NumPoints,
-    M is N - 1,
-    Point = polar(Distance, Rad),
-    initial_asteroid_points(NumPoints, M, Points).
+    Point = polar(Distance, Rad).
 
 initial_asteroid_points(NumPoints, Points) :-
-    initial_asteroid_points(NumPoints, NumPoints, Points).
+    findall(Point, (between(1, NumPoints, N), initial_asteroid_point(NumPoints, N, Point)), Points).
 
 make_asteroid(Size, Width, Height, Asteroid) :-
-    format("Make ~w ~w ~w ~w~n", [Size, Width, Height, Asteroid]),
     random_between(0, 360, Deg),
     deg_rad(Deg, Rad),
     Speed = 15,
@@ -378,7 +360,7 @@ make_asteroid(Size, Width, Height, Asteroid) :-
     }.
 
 asteroid_bounds(Asteroid, Bounds) :-
-    maplist(asteroid_point_vec2(Asteroid.rot, Asteroid.Size, Asteroid.pos), Asteroid.points, Points),
+    maplist(asteroid_point_vec2(Asteroid.rot, Asteroid.size, Asteroid.pos), Asteroid.points, Points),
     maplist(vec2_x, Points, XS),
     maplist(vec2_y, Points, YS),
     min_list(XS, Left),
@@ -393,7 +375,7 @@ asteroid_point_vec2(Rot, Size, Pos, Polar, Vec) :-
     vec2_eval(Vec, Pos + RotatedScaledPos).
 
 draw_asteroid(Renderer, Asteroid) :-
-    maplist(asteroid_point_vec2(Asteroid.rot, Asteroid.Size, Asteroid.pos), Asteroid.points, Points),
+    maplist(asteroid_point_vec2(Asteroid.rot, Asteroid.size, Asteroid.pos), Asteroid.points, Points),
     draw_polygon(Renderer, Points).
 
 update_asteroid(State, Delta, Asteroid, NextAsteroid) :-
@@ -409,10 +391,9 @@ update_asteroid(State, Delta, Asteroid, NextAsteroid) :-
     }).
 
 initial_state(State, Width, Height) :-
-    initial_stars(Stars, 400, Width, Height),
+    findall(Star, (between(0, 400, _), initial_star(Star, Width, Height)), Stars),
     initial_ship(Ship, Width, Height),
-    findall(_, between(1, 5, N), Asteroids), /* Aha! */
-    maplist(make_asteroid(30, Width, Height), Asteroids),
+    findall(Asteroid, (between(1, 5, _), make_asteroid(30, Width, Height, Asteroid)), Asteroids),
     get_time(When),
     list_to_assoc([
         stars-Stars,
