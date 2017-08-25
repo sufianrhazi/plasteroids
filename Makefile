@@ -4,7 +4,7 @@ LDFLAGS=$(shell pkg-config sdl2 --libs)
 all: sdl
 
 sdl: sdl.pl sdl.so
-	swipl --goal=main --stand_alone=true -o sdl -c sdl.pl
+	swipl -O --goal=main --stand_alone=true -o sdl -c sdl.pl
 
 sdl.so: sdl.o
 	swipl-ld -shared -o $@ $(LDFLAGS) -ld clang $< 

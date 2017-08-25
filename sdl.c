@@ -398,6 +398,24 @@ fail:
     return FALSE;
 }
 
+int get_rgba(term_t term, Uint8 rgba[4]) {
+    term_t rgba_term = PL_new_term_ref();
+    if (!PL_put_functor(rgba_term, rgba_f)) return FALSE;
+    fid_t fid = PL_open_foreign_frame();
+    for (int i = 0; i < 4; ++i) {
+        term_t color = PL_new_term_ref();
+        if (!PL_get_arg(1 + i, rgba_term, color)) goto fail;
+        long tmp;
+        if (!PL_is_integer(color) || !PL_get_long(color, &tmp)) goto fail;
+        rgba[i] = (Uint8)tmp;
+    }
+    PL_close_foreign_frame(fid);
+    return TRUE;
+fail:
+    PL_rewind_foreign_frame(fid);
+    return FALSE;
+}
+
 int get_line(term_t term, SDL_Point *a, SDL_Point *b) {
     term_t line = PL_new_term_ref();
     if (!PL_put_functor(line, line_f)) return FALSE;
@@ -487,242 +505,339 @@ static foreign_t pl_sdl_draw(term_t renderer, term_t shape) {
     return TRUE;
 }
 
-static foreign_t pl_sdl_wait_event(term_t term, term_t timeout_term) {
-    int ms;
-    if (!PL_get_integer(timeout_term, &ms)) {
+static foreign_t pl_sdl_draw_many(term_t renderer, term_t shapes) {
+    sdl_object *robj = object_read(renderer, KIND_RENDERER);
+    if (robj == NULL) {
+        debug_log("renderer not a renderer\n");
         return FALSE;
     }
-    SDL_Event event;
-    if (!SDL_WaitEventTimeout(&event, ms)) {
-        return PL_unify_atom_chars(term, "timeout");
+    SDL_Point a;
+    SDL_Point b;
+    SDL_Rect r;
+    Uint8 rgba[4];
+    if (PL_skip_list(shapes, 0, NULL) != PL_LIST) {
+        return FALSE;
     }
-    switch (event.type) {
-        /* Application events */
-        case SDL_QUIT:
-            /**< User-requested quit */
-            return PL_unify_atom_chars(term, "quit");
-
-        /* iOS events */
-        case SDL_APP_TERMINATING:
-            /**< The application is being terminated by the OS
-              Called on iOS in applicationWillTerminate()
-              Called on Android in onDestroy()
-              */
-            break;
-        case SDL_APP_LOWMEMORY:
-            /**< The application is low on memory, free memory if possible.
-              Called on iOS in applicationDidReceiveMemoryWarning()
-              Called on Android in onLowMemory()
-              */
-            break;
-        case SDL_APP_WILLENTERBACKGROUND:
-            /**< The application is about to enter the background
-              Called on iOS in applicationWillResignActive()
-              Called on Android in onPause()
-              */
-            break;
-        case SDL_APP_DIDENTERBACKGROUND:
-            /**< The application did enter the background and may not get CPU for some time
-              Called on iOS in applicationDidEnterBackground()
-              Called on Android in onPause()
-              */
-            break;
-        case SDL_APP_WILLENTERFOREGROUND:
-            /**< The application is about to enter the foreground
-              Called on iOS in applicationWillEnterForeground()
-              Called on Android in onResume()
-              */
-            break;
-        case SDL_APP_DIDENTERFOREGROUND:
-            /**< The application is now interactive
-              Called on iOS in applicationDidBecomeActive()
-              Called on Android in onResume()
-              */
-            break;
-
-        /* Window events */
-        case SDL_WINDOWEVENT:
-            /* SDL_Window *win = SDL_GetWindowFromID(event.window.windowID); */
-            /* TODO: add which window, additional data */
-            switch (event.window.event) {
-                case SDL_WINDOWEVENT_SHOWN:          /**< Window has been shown */
-                    return PL_unify_term(term,
-                        PL_FUNCTOR, window_f,
-                            PL_CHARS, "shown"
-                    );
-                case SDL_WINDOWEVENT_HIDDEN:         /**< Window has been hidden */
-                    return PL_unify_term(term,
-                        PL_FUNCTOR, window_f,
-                            PL_CHARS, "hidden"
-                    );
-                case SDL_WINDOWEVENT_EXPOSED:        /**< Window has been exposed and should be redrawn */
-                    return PL_unify_term(term,
-                        PL_FUNCTOR, window_f,
-                            PL_CHARS, "exposed"
-                    );
-                case SDL_WINDOWEVENT_MOVED:          /**< Window has been moved to data1, data2 */
-                    return PL_unify_term(term,
-                        PL_FUNCTOR, window_f,
-                            PL_CHARS, "moved"
-                    );
-                case SDL_WINDOWEVENT_RESIZED:        /**< Window has been resized to data1xdata2 */
-                    return PL_unify_term(term,
-                        PL_FUNCTOR, window_f,
-                            PL_CHARS, "resized"
-                    );
-                case SDL_WINDOWEVENT_SIZE_CHANGED:   /**< The window size has changed, either as a result of an API call or through the system or user changing the window size. */
-                    return PL_unify_term(term,
-                        PL_FUNCTOR, window_f,
-                            PL_CHARS, "size_changed"
-                    );
-                case SDL_WINDOWEVENT_MINIMIZED:      /**< Window has been minimized */
-                    return PL_unify_term(term,
-                        PL_FUNCTOR, window_f,
-                            PL_CHARS, "minimized"
-                    );
-                case SDL_WINDOWEVENT_MAXIMIZED:      /**< Window has been maximized */
-                    return PL_unify_term(term,
-                        PL_FUNCTOR, window_f,
-                            PL_CHARS, "maximized"
-                    );
-                case SDL_WINDOWEVENT_RESTORED:       /**< Window has been restored to normal size and position */
-                    return PL_unify_term(term,
-                        PL_FUNCTOR, window_f,
-                            PL_CHARS, "restored"
-                    );
-                case SDL_WINDOWEVENT_ENTER:          /**< Window has gained mouse focus */
-                    return PL_unify_term(term,
-                        PL_FUNCTOR, window_f,
-                            PL_CHARS, "enter"
-                    );
-                case SDL_WINDOWEVENT_LEAVE:          /**< Window has lost mouse focus */
-                    return PL_unify_term(term,
-                        PL_FUNCTOR, window_f,
-                            PL_CHARS, "leave"
-                    );
-                case SDL_WINDOWEVENT_FOCUS_GAINED:   /**< Window has gained keyboard focus */
-                    return PL_unify_term(term,
-                        PL_FUNCTOR, window_f,
-                            PL_CHARS, "focus_gained"
-                    );
-                case SDL_WINDOWEVENT_FOCUS_LOST:     /**< Window has lost keyboard focus */
-                    return PL_unify_term(term,
-                        PL_FUNCTOR, window_f,
-                            PL_CHARS, "focus_lost"
-                    );
-                case SDL_WINDOWEVENT_CLOSE:          /**< The window manager requests that the window be closed */
-                    return PL_unify_term(term,
-                        PL_FUNCTOR, window_f,
-                            PL_CHARS, "close"
-                    );
+    term_t shape = PL_new_term_ref();
+    term_t tail = PL_copy_term_ref(shapes);
+    fid_t fid = PL_open_foreign_frame();
+    while (PL_get_list(tail, shape, tail)) {
+        if (get_rgba(shape, rgba)) {
+            if (SDL_SetRenderDrawColor(robj->object, rgba[0], rgba[1], rgba[2], rgba[3])) {
+                debug_log("Failed to set draw color: %s\n", SDL_GetError());
+                goto fail;
             }
-            break;
-
-        case SDL_SYSWMEVENT: /**< System specific event */
-            break;       
-
-        /* Keyboard events */
-        case SDL_KEYDOWN: /**< Key pressed */
-        case SDL_KEYUP: /**< Key released */
-        {
-            const char *keyname = SDL_GetKeyName(event.key.keysym.sym);
-            return PL_unify_term(term,
-                PL_FUNCTOR, key_f,
-                    PL_UTF8_STRING, keyname,
-                    PL_CHARS, event.key.state == SDL_PRESSED ? "down" : "up",
-                    PL_CHARS, event.key.repeat == 0 ? "initial" : "repeat"
-            );
-            break;
+        } else if (get_point(shape, &a)) {
+            if (SDL_RenderDrawPoint(robj->object, a.x, a.y)) {
+                debug_log("Could not draw point: %s\n", SDL_GetError());
+                goto fail;
+            }
+        } else if (get_line(shape, &a, &b)) {
+            if (SDL_RenderDrawLine(robj->object, a.x, a.y, b.x, b.y)) {
+                debug_log("Could not draw line: %s\n", SDL_GetError());
+                goto fail;
+            }
+        } else if (get_rect(shape, &r)) {
+            if (SDL_RenderDrawRect(robj->object, &r)) {
+                debug_log("Draw rect failed: %s\n", SDL_GetError());
+                goto fail;
+            }
+        } else if (get_fill_rect(shape, &r)) {
+            if (SDL_RenderFillRect(robj->object, &r)) {
+                debug_log("Draw fill rect failed: %s\n", SDL_GetError());
+                goto fail;
+            }
+        } else {
+            debug_log("No match\n");
+            goto fail;
         }
-        case SDL_TEXTEDITING: /**< Keyboard text editing (composition) */
-            break;
-        case SDL_TEXTINPUT: /**< Keyboard text input */
-            break;
-        case SDL_KEYMAPCHANGED: /**< Keymap changed due to a system event such as an input language or keyboard layout change. */
-            break;
-
-        /* Mouse events */
-        case SDL_MOUSEMOTION:
-            return PL_unify_term(term,
-                PL_FUNCTOR, mouse_position_f,
-                    PL_INT, event.motion.x,
-                    PL_INT, event.motion.y);
-            break;
-        case SDL_MOUSEBUTTONDOWN:       
-            /**< Mouse button pressed */
-            break;
-        case SDL_MOUSEBUTTONUP:         
-            /**< Mouse button released */
-            break;
-        case SDL_MOUSEWHEEL:            
-            /**< Mouse wheel motion */
-            break;
-
-        /* Joystick events */
-        case SDL_JOYAXISMOTION:
-            /**< Joystick axis motion */
-        case SDL_JOYBALLMOTION:         
-            /**< Joystick trackball motion */
-        case SDL_JOYHATMOTION:          
-            /**< Joystick hat position change */
-        case SDL_JOYBUTTONDOWN:         
-            /**< Joystick button pressed */
-        case SDL_JOYBUTTONUP:           
-            /**< Joystick button released */
-        case SDL_JOYDEVICEADDED:        
-            /**< A new joystick has been inserted into the system */
-        case SDL_JOYDEVICEREMOVED:      
-            /**< An opened joystick has been removed */
-
-        /* Game controller events */
-        case SDL_CONTROLLERAXISMOTION:
-            /**< Game controller axis motion */
-        case SDL_CONTROLLERBUTTONDOWN:         
-            /**< Game controller button pressed */
-        case SDL_CONTROLLERBUTTONUP:           
-            /**< Game controller button released */
-        case SDL_CONTROLLERDEVICEADDED:        
-            /**< A new Game controller has been inserted into the system */
-        case SDL_CONTROLLERDEVICEREMOVED:      
-            /**< An opened Game controller has been removed */
-        case SDL_CONTROLLERDEVICEREMAPPED:     
-            /**< The controller mapping was updated */
-
-        /* Touch events */
-        case SDL_FINGERDOWN:
-        case SDL_FINGERUP:
-        case SDL_FINGERMOTION:
-
-        /* Gesture events */
-        case SDL_DOLLARGESTURE:
-        case SDL_DOLLARRECORD:
-        case SDL_MULTIGESTURE:
-
-        /* Clipboard events */
-        case SDL_CLIPBOARDUPDATE:
-            /**< The clipboard changed */
-
-        /* Drag and drop events */
-        case SDL_DROPFILE:
-            /**< The system requests a file open */
-
-            /* Audio hotplug events */
-        case SDL_AUDIODEVICEADDED:
-            /**< A new audio device is available */
-        case SDL_AUDIODEVICEREMOVED:       
-            /**< An audio device has been removed. */
-
-        /* Render events */
-        case SDL_RENDER_TARGETS_RESET:
-            /**< The render targets have been reset and their contents need to be updated */
-        case SDL_RENDER_DEVICE_RESET:
-            /**< The device has been reset and all textures need to be recreated */
-
-        case SDL_USEREVENT:
-        default:
-            break;
     }
-    return PL_unify_atom_chars(term, "unknown");
+    PL_close_foreign_frame(fid);
+    return TRUE;
+fail:
+    PL_rewind_foreign_frame(fid);
+    return FALSE;
+}
+
+static foreign_t pl_sdl_poll_events(term_t term) {
+    term_t head = PL_new_term_ref();
+    SDL_Event event;
+    fid_t fid = PL_open_foreign_frame();
+    int handled;
+    int unify;
+    while (SDL_PollEvent(&event)) {
+        term_t item = PL_new_term_ref();
+        handled = 0;
+        switch (event.type) {
+            /* Application events */
+            case SDL_QUIT:
+                /**< User-requested quit */
+                handled = 1;
+                unify = PL_unify_atom_chars(item, "quit");
+                break;
+
+            /* iOS events */
+            case SDL_APP_TERMINATING:
+                /**< The application is being terminated by the OS
+                  Called on iOS in applicationWillTerminate()
+                  Called on Android in onDestroy()
+                  */
+                break;
+            case SDL_APP_LOWMEMORY:
+                /**< The application is low on memory, free memory if possible.
+                  Called on iOS in applicationDidReceiveMemoryWarning()
+                  Called on Android in onLowMemory()
+                  */
+                break;
+            case SDL_APP_WILLENTERBACKGROUND:
+                /**< The application is about to enter the background
+                  Called on iOS in applicationWillResignActive()
+                  Called on Android in onPause()
+                  */
+                break;
+            case SDL_APP_DIDENTERBACKGROUND:
+                /**< The application did enter the background and may not get CPU for some time
+                  Called on iOS in applicationDidEnterBackground()
+                  Called on Android in onPause()
+                  */
+                break;
+            case SDL_APP_WILLENTERFOREGROUND:
+                /**< The application is about to enter the foreground
+                  Called on iOS in applicationWillEnterForeground()
+                  Called on Android in onResume()
+                  */
+                break;
+            case SDL_APP_DIDENTERFOREGROUND:
+                /**< The application is now interactive
+                  Called on iOS in applicationDidBecomeActive()
+                  Called on Android in onResume()
+                  */
+                break;
+
+            /* Window events */
+            case SDL_WINDOWEVENT:
+                /* SDL_Window *win = SDL_GetWindowFromID(event.window.windowID); */
+                /* TODO: add which window, additional data */
+                switch (event.window.event) {
+                    case SDL_WINDOWEVENT_SHOWN:          /**< Window has been shown */
+                        handled = 1;
+                        unify = PL_unify_term(item,
+                            PL_FUNCTOR, window_f,
+                                PL_CHARS, "shown"
+                        );
+                        break;
+                    case SDL_WINDOWEVENT_HIDDEN:         /**< Window has been hidden */
+                        handled = 1;
+                        unify = PL_unify_term(item,
+                            PL_FUNCTOR, window_f,
+                                PL_CHARS, "hidden"
+                        );
+                        break;
+                    case SDL_WINDOWEVENT_EXPOSED:        /**< Window has been exposed and should be redrawn */
+                        handled = 1;
+                        unify = PL_unify_term(item,
+                            PL_FUNCTOR, window_f,
+                                PL_CHARS, "exposed"
+                        );
+                        break;
+                    case SDL_WINDOWEVENT_MOVED:          /**< Window has been moved to data1, data2 */
+                        handled = 1;
+                        unify = PL_unify_term(item,
+                            PL_FUNCTOR, window_f,
+                                PL_CHARS, "moved"
+                        );
+                        break;
+                    case SDL_WINDOWEVENT_RESIZED:        /**< Window has been resized to data1xdata2 */
+                        handled = 1;
+                        unify = PL_unify_term(item,
+                            PL_FUNCTOR, window_f,
+                                PL_CHARS, "resized"
+                        );
+                        break;
+                    case SDL_WINDOWEVENT_SIZE_CHANGED:   /**< The window size has changed, either as a result of an API call or through the system or user changing the window size. */
+                        handled = 1;
+                        unify = PL_unify_term(item,
+                            PL_FUNCTOR, window_f,
+                                PL_CHARS, "size_changed"
+                        );
+                        break;
+                    case SDL_WINDOWEVENT_MINIMIZED:      /**< Window has been minimized */
+                        handled = 1;
+                        unify = PL_unify_term(item,
+                            PL_FUNCTOR, window_f,
+                                PL_CHARS, "minimized"
+                        );
+                        break;
+                    case SDL_WINDOWEVENT_MAXIMIZED:      /**< Window has been maximized */
+                        handled = 1;
+                        unify = PL_unify_term(item,
+                            PL_FUNCTOR, window_f,
+                                PL_CHARS, "maximized"
+                        );
+                        break;
+                    case SDL_WINDOWEVENT_RESTORED:       /**< Window has been restored to normal size and position */
+                        handled = 1;
+                        unify = PL_unify_term(item,
+                            PL_FUNCTOR, window_f,
+                                PL_CHARS, "restored"
+                        );
+                        break;
+                    case SDL_WINDOWEVENT_ENTER:          /**< Window has gained mouse focus */
+                        handled = 1;
+                        unify = PL_unify_term(item,
+                            PL_FUNCTOR, window_f,
+                                PL_CHARS, "enter"
+                        );
+                        break;
+                    case SDL_WINDOWEVENT_LEAVE:          /**< Window has lost mouse focus */
+                        handled = 1;
+                        unify = PL_unify_term(item,
+                            PL_FUNCTOR, window_f,
+                                PL_CHARS, "leave"
+                        );
+                        break;
+                    case SDL_WINDOWEVENT_FOCUS_GAINED:   /**< Window has gained keyboard focus */
+                        handled = 1;
+                        unify = PL_unify_term(item,
+                            PL_FUNCTOR, window_f,
+                                PL_CHARS, "focus_gained"
+                        );
+                        break;
+                    case SDL_WINDOWEVENT_FOCUS_LOST:     /**< Window has lost keyboard focus */
+                        handled = 1;
+                        unify = PL_unify_term(item,
+                            PL_FUNCTOR, window_f,
+                                PL_CHARS, "focus_lost"
+                        );
+                        break;
+                    case SDL_WINDOWEVENT_CLOSE:          /**< The window manager requests that the window be closed */
+                        handled = 1;
+                        unify = PL_unify_term(item,
+                            PL_FUNCTOR, window_f,
+                                PL_CHARS, "close"
+                        );
+                        break;
+                }
+                break;
+
+            case SDL_SYSWMEVENT: /**< System specific event */
+                break;       
+
+            /* Keyboard events */
+            case SDL_KEYDOWN: /**< Key pressed */
+            case SDL_KEYUP: /**< Key released */
+            {
+                const char *keyname = SDL_GetKeyName(event.key.keysym.sym);
+                handled = 1;
+                unify = PL_unify_term(item,
+                    PL_FUNCTOR, key_f,
+                        PL_UTF8_STRING, keyname,
+                        PL_CHARS, event.key.state == SDL_PRESSED ? "down" : "up",
+                        PL_CHARS, event.key.repeat == 0 ? "initial" : "repeat"
+                );
+                break;
+            }
+            case SDL_TEXTEDITING: /**< Keyboard text editing (composition) */
+                break;
+            case SDL_TEXTINPUT: /**< Keyboard text input */
+                break;
+            case SDL_KEYMAPCHANGED: /**< Keymap changed due to a system event such as an input language or keyboard layout change. */
+                break;
+
+            /* Mouse events */
+            case SDL_MOUSEMOTION:
+                handled = 1;
+                unify = PL_unify_term(item,
+                    PL_FUNCTOR, mouse_position_f,
+                        PL_INT, event.motion.x,
+                        PL_INT, event.motion.y);
+                break;
+            case SDL_MOUSEBUTTONDOWN:       
+                /**< Mouse button pressed */
+                break;
+            case SDL_MOUSEBUTTONUP:         
+                /**< Mouse button released */
+                break;
+            case SDL_MOUSEWHEEL:            
+                /**< Mouse wheel motion */
+                break;
+
+            /* Joystick events */
+            case SDL_JOYAXISMOTION:
+                /**< Joystick axis motion */
+            case SDL_JOYBALLMOTION:         
+                /**< Joystick trackball motion */
+            case SDL_JOYHATMOTION:          
+                /**< Joystick hat position change */
+            case SDL_JOYBUTTONDOWN:         
+                /**< Joystick button pressed */
+            case SDL_JOYBUTTONUP:           
+                /**< Joystick button released */
+            case SDL_JOYDEVICEADDED:        
+                /**< A new joystick has been inserted into the system */
+            case SDL_JOYDEVICEREMOVED:      
+                /**< An opened joystick has been removed */
+
+            /* Game controller events */
+            case SDL_CONTROLLERAXISMOTION:
+                /**< Game controller axis motion */
+            case SDL_CONTROLLERBUTTONDOWN:         
+                /**< Game controller button pressed */
+            case SDL_CONTROLLERBUTTONUP:           
+                /**< Game controller button released */
+            case SDL_CONTROLLERDEVICEADDED:        
+                /**< A new Game controller has been inserted into the system */
+            case SDL_CONTROLLERDEVICEREMOVED:      
+                /**< An opened Game controller has been removed */
+            case SDL_CONTROLLERDEVICEREMAPPED:     
+                /**< The controller mapping was updated */
+
+            /* Touch events */
+            case SDL_FINGERDOWN:
+            case SDL_FINGERUP:
+            case SDL_FINGERMOTION:
+
+            /* Gesture events */
+            case SDL_DOLLARGESTURE:
+            case SDL_DOLLARRECORD:
+            case SDL_MULTIGESTURE:
+
+            /* Clipboard events */
+            case SDL_CLIPBOARDUPDATE:
+                /**< The clipboard changed */
+
+            /* Drag and drop events */
+            case SDL_DROPFILE:
+                /**< The system requests a file open */
+
+                /* Audio hotplug events */
+            case SDL_AUDIODEVICEADDED:
+                /**< A new audio device is available */
+            case SDL_AUDIODEVICEREMOVED:       
+                /**< An audio device has been removed. */
+
+            /* Render events */
+            case SDL_RENDER_TARGETS_RESET:
+                /**< The render targets have been reset and their contents need to be updated */
+            case SDL_RENDER_DEVICE_RESET:
+                /**< The device has been reset and all textures need to be recreated */
+
+            case SDL_USEREVENT:
+            default:
+                break;
+        }
+        if (handled) {
+            if (!unify) goto error;
+            if (!PL_unify_list(term, head, term)) goto error;
+            if (!PL_unify(head, item)) goto error;
+        }
+    }
+    if (!PL_unify_nil(term)) goto error;
+    PL_close_foreign_frame(fid);
+    return TRUE;
+error:
+    PL_rewind_foreign_frame(fid);
+    return FALSE;
 }
 
 static foreign_t pl_sdl_terminate() {
@@ -752,6 +867,7 @@ install_t install_sdl() {
     PL_register_foreign("sdl_render_clear", 1, pl_sdl_render_clear, 0);
     PL_register_foreign("sdl_render_present", 1, pl_sdl_render_present, 0);
     PL_register_foreign("sdl_draw", 2, pl_sdl_draw, 0);
-    PL_register_foreign("sdl_wait_event", 2, pl_sdl_wait_event, 0);
+    PL_register_foreign("sdl_draw_many", 2, pl_sdl_draw_many, 0);
+    PL_register_foreign("sdl_poll_events", 1, pl_sdl_poll_events, 0);
     PL_register_foreign("sdl_terminate", 0, pl_sdl_terminate, 0);
 }
