@@ -1,4 +1,4 @@
 *.swp
 *.so
 *.o
-/sdl
+/plasteroids

@@ -22,12 +22,14 @@ vec2_eval(vec2(X, Y), scale(S, V)) :-
     Y is VY * S.
 
 vec2_eval(vec2(X, Y), unit_rad(R)) :- /* TODO: use polar coords */
-    X is cos(R),
-    Y is sin(R).
+    fastcos(R, X),
+    fastsin(R, Y).
 
 vec2_polar(vec2(X, Y), polar(R, Phi)) :-
-    X is R * cos(Phi),
-    Y is R * sin(Phi).
+    fastcos(Phi, A),
+    fastsin(Phi, B),
+    X is R * A,
+    Y is R * B.
 
 polar_eval(polar(R, Phi), polar(R, Phi)).
 

@@ -217,6 +217,25 @@ initial_star(Star, Width, Height) :-
     Period is 2 * pi * (P / 100),
     Star = star{ pos: vec2(X, Y), color: rgb(R, G, B), intensity: Intensity, period: Period }.
 
+fastsin(T, X) :-
+    D is round(T * 180 / pi) mod 360,
+    sintab(D, X).
+
+fastcos(T, X) :-
+    fastsin(T + pi / 2, X).
+
+makesintab :-
+    findall(X, (
+        between(0, 359, N),
+        R is N * pi / 180,
+        X is sin(R),
+        assert(sintab(N, X))
+    ), _).
+
+random_between(Low, Hi, Val) :-
+    random(X),
+    Val is floor((Hi + 1 - Low) * X + Low).
+
 draw_star(Time, Renderer, Star) :-
     random_between(0, 100, Ra),
     random_between(0, 100, Ga),
@@ -225,7 +244,8 @@ draw_star(Time, Renderer, Star) :-
     R is Ra + Rb,
     G is Ga + Gb,
     B is Ba + Bb,
-    Alpha is 205 + round(Star.intensity * sin(Time * Star.period)),
+    fastsin(Time * Star.period, X),
+    Alpha is 205 + round(Star.intensity * X),
     sdl_render_color(Renderer, rgba(R, G, B, Alpha)),
     sdl_draw(Renderer, Star.pos).
 
@@ -402,6 +422,7 @@ initial_state(State) :-
     ], State).
 
 main(_) :-
+    makesintab,
     sdl_init([video]),
     initial_state(State),
     get_assoc(dim, State, vec2(Width, Height)),
@@ -409,7 +430,7 @@ main(_) :-
     sdl_create_renderer(Window, [software], Renderer),
     sdl_render_blendmode(Renderer, alpha),
     get_time(Now),
-    event_loop(Now, Renderer, State),
+    once(event_loop(Now, Renderer, State)),
     sdl_destroy_renderer(Renderer),
     sdl_destroy_window(Window),
     sdl_terminate.
