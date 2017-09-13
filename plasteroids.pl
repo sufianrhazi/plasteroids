@@ -78,7 +78,7 @@ is_collision(Bullet, Asteroid) :-
 
 split_asteroid(Asteroid, SplitAsteroids) :-
     NextSize is Asteroid.size / 2,
-    (NextSize < 4 ->
+    (NextSize < 2 ->
         SplitAsteroids = []
     ;
         findall(NewAsteroid, (
@@ -134,44 +134,46 @@ wrap_bounds(rect(vec2(OutL, OutT), vec2(OutR, OutB)), rect(vec2(InL, InT), vec2(
             ; WrapY = Y).
 
 handle_input(key("Right", down, initial), State, InputState) :-
-    Ship = State.ship,
-    Ship1 = Ship.put(_{turn: clockwise}),
     InputState = State.put(_{
-        ship: Ship1
+        ship: State.ship.put(_{
+            turn: clockwise
+        })
     }).
 
 handle_input(key("Right", up, initial), State, InputState) :-
-    Ship = State.ship,
-    Ship1 = Ship.put(_{turn: no}),
     InputState = State.put(_{
-        ship: Ship1
+        ship: State.ship.put(_{
+            turn: no
+        })
     }).
 
 handle_input(key("Left", down, initial), State, InputState) :-
-    Ship = State.ship,
-    Ship1 = Ship.put(_{turn: counterclockwise}),
-    InputState = State.put(_{ ship: Ship1 }).
+    InputState = State.put(_{
+        ship: State.ship.put(_{
+            turn: counterclockwise
+        })
+    }).
 
 handle_input(key("Left", up, initial), State, InputState) :-
-    Ship = State.ship,
-    Ship1 = Ship.put(_{turn: no}),
-    InputState = State.put(_{ ship: Ship1 }).
+    InputState = State.put(_{
+        ship: State.ship.put(_{turn: no})
+    }).
 
 handle_input(key("Up", down, initial), State, InputState) :-
-    Ship = State.ship,
-    Ship1 = Ship.put(_{accel: true}),
-    InputState = State.put(_{ ship: Ship1 }).
+    InputState = State.put(_{
+        ship: State.ship.put(_{accel: true})
+    }).
 
 handle_input(key("Up", up, initial), State, InputState) :-
-    Ship = State.ship,
-    Ship1 = Ship.put(_{accel: false}),
-    InputState = State.put(_{ ship: Ship1 }).
+    InputState = State.put(_{
+        ship: State.ship.put(_{accel: false})
+    }).
 
 handle_input(key("Space", down, initial), State, InputState) :-
-    Ship = State.ship,
-    make_bullet(Ship, Bullet),
-    Bullets = State.bullets,
-    InputState = State.put(_{ bullets: [Bullet|Bullets] }).
+    make_bullet(State.ship, Bullet),
+    InputState = State.put(_{
+        bullets: [Bullet|State.bullets]
+    }).
 
 handle_input(quit, _, quit).
 
