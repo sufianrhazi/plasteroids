@@ -40,12 +40,9 @@ update_ship(State, Delta, Ship, NextShip) :-
     (Ship.turn = no
         -> Dir = Ship.dir
         ; true),
-    (Ship.accel = false
-        -> Vel = Ship.vel
-        ; true),
-    (Ship.accel = true
+    (Ship.accel
         -> vec2_eval(Vel, Ship.vel + scale(Delta * 50, unit_rad(Ship.dir)))
-        ; true),
+        ;  Vel = Ship.vel),
     vec2_eval(Pos, Ship.pos + scale(Delta, Vel)),
     MovedShip = Ship.put(_{
         dir: Dir,
