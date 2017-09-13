@@ -17,7 +17,7 @@ bullet_bounds(Bullet, rect(TopLeft, BottomRight)) :-
     vec2_eval(BottomRight, Bullet.pos + vec2(1, 1)).
 
 bullet_alive(State, Bullet) :-
-    get_assoc(time, State, Now),
+    Now = State.time,
     Now < Bullet.expiry.
 
 update_bullet(State, Delta, Bullet, NewBullet) :-
@@ -26,7 +26,7 @@ update_bullet(State, Delta, Bullet, NewBullet) :-
         pos: Dest
     }),
     bullet_bounds(Moved, Bounds),
-    get_assoc(bounds, State, ScreenBounds),
+    ScreenBounds = State.bounds,
     wrap_bounds(ScreenBounds, Bounds, Moved.pos, WrapPos),
     NewBullet = Moved.put(pos, WrapPos).
 
@@ -50,7 +50,7 @@ update_ship(State, Delta, Ship, NextShip) :-
         pos: Pos
     }),
     ship_bounds(MovedShip, Bounds),
-    get_assoc(bounds, State, ScreenBounds),
+    ScreenBounds = State.bounds,
     wrap_bounds(ScreenBounds, Bounds, Pos, WrappedPos),
     NextShip = MovedShip.put(pos, WrappedPos).
 
@@ -101,17 +101,19 @@ check_bullet_asteroid_collisions(Bullets, Asteroids, Nbs, Nas) :-
 update_state(_, quit, quit).
 
 update_state(Delta, State, NextState) :-
-    get_assoc(ship, State, Ship),
-    get_assoc(bullets, State, Bullets),
-    get_assoc(asteroids, State, Asteroids),
+    Ship = State.ship,
+    Bullets = State.bullets,
+    Asteroids = State.asteroids,
     check_bullet_asteroid_collisions(Bullets, Asteroids, HitBullets, HitAsteroids),
     update_ship(State, Delta, Ship, NextShip),
     include(bullet_alive(State), HitBullets, LiveBullets),
     maplist(update_bullet(State, Delta), LiveBullets, NextBullets),
     maplist(update_asteroid(State, Delta), HitAsteroids, NextAsteroids),
-    put_assoc(bullets, State, NextBullets, State1),
-    put_assoc(asteroids, State1, NextAsteroids, State2),
-    put_assoc(ship, State2, NextShip, NextState).
+    NextState = State.put(_{
+        bullets: NextBullets,
+        asteroids: NextAsteroids,
+        ship: NextShip
+    }).
 
 in_bounds(rect(vec2(L, T), vec2(R, B)), vec2(X, Y)) :-
     L =< X,
@@ -132,40 +134,44 @@ wrap_bounds(rect(vec2(OutL, OutT), vec2(OutR, OutB)), rect(vec2(InL, InT), vec2(
             ; WrapY = Y).
 
 handle_input(key("Right", down, initial), State, InputState) :-
-    get_assoc(ship, State, Ship),
+    Ship = State.ship,
     Ship1 = Ship.put(_{turn: clockwise}),
-    put_assoc(ship, State, Ship1, InputState).
+    InputState = State.put(_{
+        ship: Ship1
+    }).
 
 handle_input(key("Right", up, initial), State, InputState) :-
-    get_assoc(ship, State, Ship),
+    Ship = State.ship,
     Ship1 = Ship.put(_{turn: no}),
-    put_assoc(ship, State, Ship1, InputState).
+    InputState = State.put(_{
+        ship: Ship1
+    }).
 
 handle_input(key("Left", down, initial), State, InputState) :-
-    get_assoc(ship, State, Ship),
+    Ship = State.ship,
     Ship1 = Ship.put(_{turn: counterclockwise}),
-    put_assoc(ship, State, Ship1, InputState).
+    InputState = State.put(_{ ship: Ship1 }).
 
 handle_input(key("Left", up, initial), State, InputState) :-
-    get_assoc(ship, State, Ship),
+    Ship = State.ship,
     Ship1 = Ship.put(_{turn: no}),
-    put_assoc(ship, State, Ship1, InputState).
+    InputState = State.put(_{ ship: Ship1 }).
 
 handle_input(key("Up", down, initial), State, InputState) :-
-    get_assoc(ship, State, Ship),
+    Ship = State.ship,
     Ship1 = Ship.put(_{accel: true}),
-    put_assoc(ship, State, Ship1, InputState).
+    InputState = State.put(_{ ship: Ship1 }).
 
 handle_input(key("Up", up, initial), State, InputState) :-
-    get_assoc(ship, State, Ship),
+    Ship = State.ship,
     Ship1 = Ship.put(_{accel: false}),
-    put_assoc(ship, State, Ship1, InputState).
+    InputState = State.put(_{ ship: Ship1 }).
 
 handle_input(key("Space", down, initial), State, InputState) :-
-    get_assoc(ship, State, Ship),
+    Ship = State.ship,
     make_bullet(Ship, Bullet),
-    get_assoc(bullets, State, Bullets),
-    put_assoc(bullets, State, [Bullet|Bullets], InputState).
+    Bullets = State.bullets,
+    InputState = State.put(_{ bullets: [Bullet|Bullets] }).
 
 handle_input(quit, _, quit).
 
@@ -176,14 +182,14 @@ handle_input(_, State, State).
 draw_state(Renderer, State) :-
     sdl_render_color(Renderer, rgba(0, 0, 0, 255)),
     sdl_render_clear(Renderer),
-    get_assoc(time, State, Now),
-    get_assoc(stars, State, Stars),
+    Now = State.time,
+    Stars = State.stars,
     maplist(draw_star(Now, Renderer), Stars),
-    get_assoc(ship, State, Ship),
+    Ship = State.ship,
     draw_ship(Renderer, Ship),
-    get_assoc(asteroids, State, Asteroids),
+    Asteroids = State.asteroids,
     maplist(draw_asteroid(Renderer), Asteroids),
-    get_assoc(bullets, State, Bullets),
+    Bullets = State.bullets,
     maplist(draw_bullet(Renderer), Bullets),
     sdl_render_present(Renderer).
 
@@ -378,7 +384,7 @@ update_asteroid(State, Delta, Asteroid, NextAsteroid) :-
     vec2_polar(Vel, Asteroid.vel),
     vec2_eval(NextPos, scale(Delta, Vel) + Asteroid.pos),
     NextRot is Delta * Asteroid.angvel + Asteroid.rot,
-    get_assoc(bounds, State, ScreenBounds),
+    ScreenBounds = State.bounds,
     asteroid_bounds(Asteroid, AsteroidBounds),
     wrap_bounds(ScreenBounds, AsteroidBounds, NextPos, WrapPos),
     NextAsteroid = Asteroid.put(_{
@@ -393,20 +399,20 @@ initial_state(State) :-
     initial_ship(Ship, Width, Height),
     findall(Asteroid, (between(1, 5, _), make_asteroid(30, Width, Height, Asteroid)), Asteroids),
     get_time(When),
-    list_to_assoc([
-        stars-Stars,
-        bullets-[],
-        asteroids-Asteroids,
-        ship-Ship,
-        time-When,
-        dim-vec2(Width, Height),
-        bounds-rect(vec2(0, 0), vec2(Width, Height))
-    ], State).
+    State = state{
+        stars: Stars,
+        bullets: [],
+        asteroids: Asteroids,
+        ship: Ship,
+        time: When,
+        dim: vec2(Width, Height),
+        bounds: rect(vec2(0, 0), vec2(Width, Height))
+    }.
 
 main(_) :-
     sdl_init([video]),
     initial_state(State),
-    get_assoc(dim, State, vec2(Width, Height)),
+    vec2(Width, Height) = State.dim,
     sdl_create_window("SDL Test", Width, Height, [], Window),
     sdl_create_renderer(Window, [software], Renderer),
     sdl_render_blendmode(Renderer, alpha),
