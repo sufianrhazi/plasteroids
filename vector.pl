@@ -48,3 +48,21 @@ polar_eval(polar(R, Phi), A - B) :-
 polar_eval(polar(R, Phi), A * scalar(S)) :-
     polar_eval(polar(R1, Phi), A),
     R is R1 * S.
+
+fastsin(T, X) :-
+    D is round(T * 180 / pi) mod 360,
+    sintab(D, X).
+
+fastcos(T, X) :-
+    fastsin(T + pi / 2, X).
+
+makesintab :-
+    findall(X, (
+        between(0, 359, N),
+        R is N * pi / 180,
+        X is sin(R),
+        assert(sintab(N, X))
+    ), _).
+
+:- makesintab.
+

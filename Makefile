@@ -3,7 +3,7 @@ LDFLAGS=$(shell pkg-config sdl2 --libs)
 
 all: plasteroids
 
-plasteroids: plasteroids.pl sdl.so
+plasteroids: vector.pl geometry.pl plasteroids.pl sdl.so
 	swipl -O --goal=main --stand_alone=true -o plasteroids -c plasteroids.pl
 
 sdl.so: sdl.o
