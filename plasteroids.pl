@@ -17,8 +17,7 @@ bullet_bounds(Bullet, rect(TopLeft, BottomRight)) :-
     vec2_eval(BottomRight, Bullet.pos + vec2(1, 1)).
 
 bullet_alive(State, Bullet) :-
-    Now = State.time,
-    Now < Bullet.expiry.
+    State.time < Bullet.expiry.
 
 update_bullet(State, Delta, Bullet, NewBullet) :-
     vec2_eval(Dest, Bullet.pos + scale(Delta, Bullet.vel)),
@@ -98,9 +97,9 @@ check_bullet_asteroid_collisions(Bullets, Asteroids, Nbs, Nas) :-
     flatten(SplitAsteroids, NewAsteroids),
     append(LiveAsteroids, NewAsteroids, Nas).
 
-update_state(_, quit, quit).
+update_state(_, _, quit, quit).
 
-update_state(Delta, State, NextState) :-
+update_state(Now, Delta, State, NextState) :-
     Ship = State.ship,
     Bullets = State.bullets,
     Asteroids = State.asteroids,
@@ -112,7 +111,8 @@ update_state(Delta, State, NextState) :-
     NextState = State.put(_{
         bullets: NextBullets,
         asteroids: NextAsteroids,
-        ship: NextShip
+        ship: NextShip,
+        time: Now
     }).
 
 in_bounds(rect(vec2(L, T), vec2(R, B)), vec2(X, Y)) :-
@@ -208,7 +208,7 @@ event_loop(Then, Renderer, State) :-
     process_input(State, InputState),
     get_time(Now),
     Delta is Now - Then,
-    update_state(Delta, InputState, UpdatedState),
+    update_state(Now, Delta, InputState, UpdatedState),
     event_loop(Now, Renderer, UpdatedState).
 
 initial_star(Star, Width, Height) :-
@@ -356,15 +356,6 @@ make_asteroid(Size, Width, Height, Asteroid) :-
         rot: 0,
         angvel: AngRad
     }.
-
-polygon_bounds(Points, Bounds) :-
-    maplist(vec2_x, Points, XS),
-    maplist(vec2_y, Points, YS),
-    min_list(XS, Left),
-    max_list(XS, Right),
-    min_list(YS, Top),
-    max_list(YS, Bottom),
-    Bounds = rect(vec2(Left, Top), vec2(Right, Bottom)).
 
 asteroid_polygon(Asteroid, Points) :-
     maplist(asteroid_point_vec2(Asteroid.rot, Asteroid.size, Asteroid.pos), Asteroid.points, Points).
